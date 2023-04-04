@@ -14,6 +14,7 @@ load_dotenv()
 def main():
     conf = ClientConfig("Standard", os.getenv("POESESSID", ""))
     client = TradeClient(conf)
+
     r = client.search(SearchConfig("Redbeak", "Rusted Sword"))
     with open("redbeak_search.json", "w+") as f:
         json.dump(r, f, indent=2, sort_keys=True)
