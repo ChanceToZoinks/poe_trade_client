@@ -1,24 +1,24 @@
-from typing import Any, Literal, TypedDict
+from typing import Any, Generic, Literal, Optional, TypedDict, TypeVar
 
 
-class FilterValue(TypedDict, total=False):
+class StatFilterValue(TypedDict, total=False):
     min: float
     max: float
 
 
-class QueryFilter(TypedDict):
+class StatFilter(TypedDict):
     disabled: bool
     id: str  # e.g., pseudo.pseudo_adds_physical_damage
-    value: FilterValue
+    value: StatFilterValue
 
 
-StatType = Literal["and", "if", "count", "weight"]
+StatFilterType = Literal["and", "if", "count", "weight"]
 
 
 class QueryStat(TypedDict):
     disabled: bool
-    filters: list[QueryFilter]
-    type: StatType
+    filters: list[StatFilter]
+    type: StatFilterType
 
 
 OnlineStatus = Literal["online", "onlineleague", "any"]
@@ -28,11 +28,48 @@ class QueryStatus(TypedDict):
     option: OnlineStatus
 
 
+class LinksFilter(TypedDict):
+    a: Optional[int]
+    b: Optional[int]
+    d: Optional[int]
+    g: Optional[int]
+    max: Optional[int]
+    min: Optional[int]
+    r: Optional[int]
+    w: Optional[int]
+
+
+class SocketFilters(TypedDict, total=False):
+    links: LinksFilter
+
+
+class AccountFilter(TypedDict):
+    input: str
+
+
+class TradeFilters(TypedDict):
+    account: AccountFilter
+
+
+_TFilters = TypeVar("_TFilters")
+
+
+class QueryFilter(TypedDict, Generic[_TFilters]):
+    disabled: bool
+    filters: _TFilters
+
+
+class QueryFilters(TypedDict, total=False):
+    socket_filters: QueryFilter[SocketFilters]
+    trade_filters: QueryFilter[TradeFilters]
+
+
 class TradeQuery(TypedDict):
     name: str
     stats: list[QueryStat]
     status: QueryStatus
     type: str
+    filters: QueryFilters
 
 
 SortPrice = Literal["asc"]  # there are more options but im lazy
@@ -53,11 +90,17 @@ class ListingStash(TypedDict):
     y: int
 
 
+class ListingAccountOnline(TypedDict):
+    league: str
+
+
 class ListingAccount(TypedDict):
     name: str
-    online: str | None
+    online: ListingAccountOnline | None
     language: str
     realm: str
+    lastCharacterName: str
+    current: bool
 
 
 class ListingPrice(TypedDict):
@@ -68,9 +111,12 @@ class ListingPrice(TypedDict):
 
 class ItemListing(TypedDict):
     method: str
-    index: str
+    indexed: str
     stash: ListingStash
     acccount: ListingAccount
+    price: ListingPrice
+    whisper: str
+    whisper_token: str
 
 
 class ItemSocket(TypedDict):
@@ -141,6 +187,12 @@ class Item(TypedDict):
     extended: ItemExtension
 
 
+class SearchResult(TypedDict):
+    id: str  # will match an entry in the list of results in PrepTradeResponse
+    listing: ItemListing
+    item: Item
+
+
 class SearchResponse(TypedDict):
     """Send a POST with a TradeRequest to search"""
 
@@ -150,13 +202,23 @@ class SearchResponse(TypedDict):
     total: int
 
 
-class SearchResult(TypedDict):
-    id: str  # will match an entry in the list of results in PrepTradeResponse
-    listing: ItemListing
-    item: Item
-
-
 class FetchResponse(TypedDict):
     """Send a GET request to fetch the search results"""
 
     result: list[SearchResult]
+
+
+class Error(TypedDict):
+    code: int
+    message: str
+
+
+class ErrorResponse(TypedDict):
+    error: Error
+
+
+class SuccessResponse(TypedDict):
+    success: bool
+
+
+WhisperResponse = SuccessResponse | ErrorResponse
