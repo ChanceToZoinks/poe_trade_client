@@ -1,9 +1,10 @@
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 import requests
+import websocket
 
 from .models import *
 
@@ -21,7 +22,20 @@ class ClientConfig:
             "Content-Type": "application/json",
         }
     )
-    log_level = logging.DEBUG
+    log_level: int = logging.WARNING
+
+
+@dataclass
+class SearchConfig:
+    item_name: str
+    item_type: str
+    online_opt: OnlineStatus = "online"
+    price_sort: SortPrice = "asc"
+    stat_filters: list[QueryStat] = field(
+        default_factory=lambda: [{"type": "and", "filters": [], "disabled": False}]
+    )
+    live: bool = False
+    live_on_item_callback: Callable[[FetchResponse], None] | None = None
 
 
 class TradeClient:
@@ -48,8 +62,13 @@ class TradeClient:
         return self.config.url + "search/" + self.config.league
 
     def _build_fetch_url(self, search_results: list[str]):
-        s = ",".join(search_results)
-        return self.config.url + "fetch/" + s
+        return self.config.url + "fetch/" + ",".join(search_results)
+
+    def _build_livesearch_url(self, query_id: str):
+        return (
+            self.config.url.replace("https", "wss")
+            + f"live/{self.config.league}/{query_id}"
+        )
 
     def _request(self, req: requests.Request):
         if not self._sess:
@@ -78,22 +97,15 @@ class TradeClient:
         )
         return self._request(r).json()
 
-    def _build_request(
-        self,
-        item_name: str,
-        item_type: str,
-        online_opt: OnlineStatus,
-        price_sort: SortPrice,
-        stat_filters: list[QueryStat],
-    ) -> TradeRequest:
+    def _build_request(self, cfg: SearchConfig) -> TradeRequest:
         return {
             "query": {
-                "status": {"option": online_opt},
-                "name": item_name,
-                "type": item_type,
-                "stats": stat_filters,
+                "status": {"option": cfg.online_opt},
+                "name": cfg.item_name,
+                "type": cfg.item_type,
+                "stats": cfg.stat_filters,
             },
-            "sort": {"price": price_sort},
+            "sort": {"price": cfg.price_sort},
         }
 
     _TPage = TypeVar("_TPage")
@@ -112,21 +124,23 @@ class TradeClient:
                 page.append(r)
         return pages
 
-    def search(
+    def _build_ws_message_handler(
         self,
-        item_name: str,
-        item_type: str,
-        online_opt: OnlineStatus = "online",
-        price_sort: SortPrice = "asc",
-        stat_filters: list[QueryStat] = [
-            {"type": "and", "filters": [], "disabled": False}
-        ],
-    ) -> FetchResponse:
-        search_res = self._search(
-            self._build_request(
-                item_name, item_type, online_opt, price_sort, stat_filters
-            )
-        )
+        search_id: str,
+        fetch_callback: Callable[[FetchResponse], None] | None,
+    ):
+        def on_message(ws, msg):
+            self._logger.debug(f"Received msg {msg}")
+            if "new" in msg:
+                new_item: list[str] = json.loads(msg)["new"]
+                fetch_res = self._fetch(self._build_fetch_url(new_item), search_id)
+                if fetch_callback:
+                    fetch_callback(fetch_res)
+
+        return on_message
+
+    def _normal_search(self, cfg: SearchConfig) -> FetchResponse:
+        search_res = self._search(self._build_request(cfg))
         # if more than 10 results have to paginate them
         paged_ids = self._build_pages(search_res["result"])
         result: FetchResponse = {"result": []}
@@ -135,3 +149,27 @@ class TradeClient:
         fetch_res = self._fetch(self._build_fetch_url(paged_ids[0]), search_res["id"])
         result["result"] += fetch_res["result"]
         return result
+
+    def _live_search(self, cfg: SearchConfig):
+        if self.config.log_level <= logging.DEBUG:
+            websocket.enableTrace(True)
+
+        # first have to get the search id
+        search_id = self._search(self._build_request(cfg))["id"]
+
+        on_message = self._build_ws_message_handler(
+            search_id, cfg.live_on_item_callback
+        )
+
+        wsapp = websocket.WebSocketApp(
+            self._build_livesearch_url(search_id),
+            on_open=lambda ws: print("opened connection"),
+            on_message=on_message,
+            header=self._build_headers(),
+        )
+        wsapp.run_forever()
+
+    def search(self, cfg: SearchConfig):
+        if cfg.live:
+            return self._live_search(cfg)
+        return self._normal_search(cfg)

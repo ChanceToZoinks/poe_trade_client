@@ -1,1 +1,1 @@
-from .client import ClientConfig, TradeClient
+from .client import ClientConfig, SearchConfig, TradeClient
