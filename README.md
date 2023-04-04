@@ -9,6 +9,7 @@ It demonstrates how to search, livesearch and whisper using the api.
 ```
 git clone https://github.com/ChanceToZoinks/poe_trade_client
 cd poe_trade_client
+pip install -r requirements.txt
 python3 ./app.py
 ```
 
